@@ -12,8 +12,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    env:
-      NPM_PUBLISH_TAG: ${{ vars.NPM_PUBLISH_TAG }}
     steps:
       - uses: actions/checkout@v6
 
@@ -22,14 +20,6 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: "https://registry.npmjs.org"
-
-      - name: Validate release configuration
-        run: |
-          set -euo pipefail
-          if [ -z "${NPM_PUBLISH_TAG:-}" ]; then
-            echo "::error::Missing GitHub Actions variable NPM_PUBLISH_TAG. Use alpha, beta, next, or latest."
-            exit 1
-          fi
 
       - name: Install dependencies
         run: npm ci
@@ -63,7 +53,7 @@ jobs:
         run: npm run pack:smoke
 
       - name: Publish to npm with provenance
-        run: npm publish --access public --provenance --tag "$NPM_PUBLISH_TAG"
+        run: npm publish --access public --provenance --tag latest
 
       - name: n8n community package scanner
         run: |

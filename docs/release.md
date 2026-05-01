@@ -3,12 +3,6 @@
 This repository publishes `@humangent/n8n-nodes-humangent` from GitHub
 Actions only. Do not publish from a local machine.
 
-## Required GitHub Configuration
-
-| Name              | Kind | Required | Purpose |
-| ----------------- | ---- | -------- | ------- |
-| `NPM_PUBLISH_TAG` | var  | yes      | npm dist-tag used by `.github/workflows/publish.yml`. Use `alpha`, `beta`, `next`, or `latest`. |
-
 No npm token is required when npm Trusted Publisher is configured. If a
 token fallback is ever added, store it in `secrets.NPM_TOKEN` and keep
 the workflow failing clearly when it is missing.
@@ -27,7 +21,6 @@ non-sensitive, or `secrets.*` if sensitive.
    - Repository owner: the GitHub owner
    - Repository name: the public repository name
    - Workflow filename: `publish.yml`
-4. Add `NPM_PUBLISH_TAG` in GitHub repository variables.
 
 ## Release
 
@@ -36,12 +29,13 @@ non-sensitive, or `secrets.*` if sensitive.
 3. Tag the same version with a `v` prefix, for example:
 
    ```bash
-   git tag v0.0.1-alpha.24
-   git push origin v0.0.1-alpha.24
+   git tag v0.0.1-alpha.27
+   git push origin v0.0.1-alpha.27
    ```
 
 4. Wait for the `publish` workflow to pass.
-5. Confirm npm shows provenance for the published version.
+5. Confirm npm shows provenance for the published version and that npm's
+   `latest` dist-tag points at it.
 
 ## Verification Checks
 

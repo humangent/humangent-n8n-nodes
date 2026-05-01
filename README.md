@@ -460,12 +460,6 @@ used only for TypeScript, linting, tests, and packaging checks.
 Releases are published from GitHub Actions using npm Trusted Publisher
 and provenance. Local-machine npm publishing is not verification-ready.
 
-Required GitHub Actions variable:
-
-| Name              | Kind | Purpose                                      |
-| ----------------- | ---- | -------------------------------------------- |
-| `NPM_PUBLISH_TAG` | var  | npm dist-tag for the release, such as `alpha`, `beta`, `next`, or `latest`. |
-
 Required GitHub Actions secrets: none for npm when Trusted Publisher is
 configured. Do not add production URLs, API keys, Supabase project refs,
 callback URLs, or private preview URLs to committed workflows.
@@ -475,11 +469,11 @@ One-time npm setup:
 1. Create the public GitHub repository.
 2. In npm package settings, add a Trusted Publisher for this repository.
 3. Use workflow filename `publish.yml`.
-4. Push a tag that matches `package.json`, for example `v0.0.1-alpha.25`.
+4. Push a tag that matches `package.json`, for example `v0.0.1-alpha.27`.
 
 The release workflow runs lint, type-check, tests, build, pack smoke,
-`npm publish --provenance`, and then the n8n scanner against the exact
-published version.
+`npm publish --provenance --tag latest`, and then the n8n scanner against
+the exact published version. Every publish updates npm's `latest` tag.
 
 ## n8n verification
 
