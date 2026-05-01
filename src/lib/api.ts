@@ -95,6 +95,117 @@ function buildUrl(rpcName: string): string {
   return `${HUMANGENT_API_URL}/rest/v1/rpc/${rpcName}`;
 }
 
+type ErrorObject = Record<string, unknown> & {
+  response?: Record<string, unknown>;
+};
+
+type ErrorBody = {
+  bodyObj?: Record<string, unknown>;
+  fallbackMessage?: string;
+};
+
+function asFiniteNumber(
+  value: unknown,
+  allowString: boolean,
+): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (allowString && typeof value === "string") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+// n8n's error shapes use `httpCode` in older versions (string) and
+// newer versions have started surfacing it as a number; handle both.
+// `statusCode` and `response.statusCode` are number-only in every
+// version we've seen — coercing strings there would mask real shape
+// drift, so they stay strict.
+function extractStatusCode(e: ErrorObject): number | undefined {
+  return (
+    asFiniteNumber(e.httpCode, true) ??
+    asFiniteNumber(e.statusCode, false) ??
+    asFiniteNumber(e.response?.statusCode, false)
+  );
+}
+
+function pickRawBody(e: ErrorObject): unknown {
+  const responseBody = (e.response as Record<string, unknown> | undefined)
+    ?.body;
+  if (responseBody !== undefined) return responseBody;
+  if (e.body !== undefined) return e.body;
+  return e.error;
+}
+
+function parseBodyString(s: string): ErrorBody {
+  try {
+    const parsed = JSON.parse(s);
+    if (typeof parsed === "object" && parsed !== null) {
+      return { bodyObj: parsed as Record<string, unknown> };
+    }
+  } catch {
+    // Not JSON — surface as the human-facing message.
+    return { fallbackMessage: s };
+  }
+  return {};
+}
+
+// Pulls the candidate body off the error and normalizes the three
+// shapes mapRequestError handles:
+//   1. parsed object → returned as `bodyObj`
+//   2. JSON string   → parsed (some runtimes don't auto-parse)
+//   3. plain string  → returned as `fallbackMessage` so the caller
+//      can use it as the human-facing message
+//   4. missing       → both undefined
+function extractErrorBody(e: ErrorObject): ErrorBody {
+  const rawBody = pickRawBody(e);
+  if (typeof rawBody === "object" && rawBody !== null) {
+    return { bodyObj: rawBody as Record<string, unknown> };
+  }
+  if (typeof rawBody === "string") return parseBodyString(rawBody);
+  return {};
+}
+
+// Preference order: `hint` > `code` > `"unknown"`.
+function pickCodeFromBody(bodyObj: Record<string, unknown>): string {
+  const hint = bodyObj.hint;
+  if (typeof hint === "string" && hint.length > 0) return hint;
+  const code = bodyObj.code;
+  if (typeof code === "string" && code.length > 0) return code;
+  return "unknown";
+}
+
+// Preference order: `bodyObj.message` > plain-text body fallback >
+// `e.message` > `"Request failed"`. `e.message` is consulted only
+// when neither a structured body nor a plain-text body is available
+// — matches n8n's older-runtime fallback where the only signal is
+// the thrown Error's message.
+function pickMessage(
+  e: ErrorObject,
+  bodyObj: Record<string, unknown> | undefined,
+  fallbackMessage: string | undefined,
+): string {
+  if (bodyObj) {
+    const m = bodyObj.message;
+    if (typeof m === "string" && m.length > 0) return m;
+    return fallbackMessage ?? "Request failed";
+  }
+  if (fallbackMessage !== undefined) return fallbackMessage;
+  if (typeof e.message === "string") return e.message;
+  return "Request failed";
+}
+
+function resolveCodeAndMessage(
+  e: ErrorObject,
+  bodyObj: Record<string, unknown> | undefined,
+  fallbackMessage: string | undefined,
+): { code: string; message: string } {
+  return {
+    code: bodyObj ? pickCodeFromBody(bodyObj) : "unknown",
+    message: pickMessage(e, bodyObj, fallbackMessage),
+  };
+}
+
 /**
  * Map the shape n8n's httpRequest throws on non-2xx into a stable
  * `{ code, message, status }`. Handles three body shapes defensively:
@@ -110,65 +221,14 @@ function mapRequestError(err: unknown): {
   message: string;
   status?: number;
 } {
-  let status: number | undefined;
-  let code = "unknown";
-  let message = "Request failed";
-
-  if (typeof err === "object" && err !== null) {
-    // n8n's error shape carries a few candidate fields; pick the first
-    // one that resolves to a number.
-    const e = err as Record<string, unknown> & {
-      response?: Record<string, unknown>;
-    };
-    // n8n's error shapes use `httpCode` in older versions (string) and
-    // newer versions have started surfacing it as a number; handle both.
-    const candidateStatus =
-      (typeof e.httpCode === "number"
-        ? e.httpCode
-        : typeof e.httpCode === "string"
-          ? Number(e.httpCode)
-          : undefined) ??
-      (typeof e.statusCode === "number" ? e.statusCode : undefined) ??
-      (typeof e.response?.statusCode === "number"
-        ? (e.response.statusCode as number)
-        : undefined);
-    if (candidateStatus !== undefined && Number.isFinite(candidateStatus)) {
-      status = candidateStatus;
-    }
-
-    const rawBody =
-      (e.response as Record<string, unknown> | undefined)?.body ??
-      e.body ??
-      e.error;
-
-    let bodyObj: Record<string, unknown> | undefined;
-    if (typeof rawBody === "object" && rawBody !== null) {
-      bodyObj = rawBody as Record<string, unknown>;
-    } else if (typeof rawBody === "string") {
-      try {
-        const parsed = JSON.parse(rawBody);
-        if (typeof parsed === "object" && parsed !== null) {
-          bodyObj = parsed as Record<string, unknown>;
-        }
-      } catch {
-        // Not JSON — fall through to plain-text message handling.
-        message = rawBody;
-      }
-    }
-
-    if (bodyObj) {
-      if (typeof bodyObj.hint === "string" && bodyObj.hint.length > 0) {
-        code = bodyObj.hint;
-      } else if (typeof bodyObj.code === "string" && bodyObj.code.length > 0) {
-        code = bodyObj.code;
-      }
-      if (typeof bodyObj.message === "string" && bodyObj.message.length > 0) {
-        message = bodyObj.message;
-      }
-    } else if (message === "Request failed" && typeof e.message === "string") {
-      message = e.message;
-    }
+  if (typeof err !== "object" || err === null) {
+    return { ok: false, code: "unknown", message: "Request failed" };
   }
+
+  const e = err as ErrorObject;
+  const status = extractStatusCode(e);
+  const { bodyObj, fallbackMessage } = extractErrorBody(e);
+  const { code, message } = resolveCodeAndMessage(e, bodyObj, fallbackMessage);
 
   return { ok: false, status, code, message };
 }
