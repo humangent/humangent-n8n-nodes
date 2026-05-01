@@ -3,7 +3,7 @@
 All notable changes to `@humangent/n8n-nodes-humangent`. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com).
 
-## 0.0.1-alpha.25 — 2026-05-01
+## 0.0.1-alpha.26 — 2026-05-01
 
 ### Changed
 
@@ -13,6 +13,14 @@ loosely follows [Keep a Changelog](https://keepachangelog.com).
 - Removed runtime environment-variable reads from node code.
 - Added GitHub Actions CI and provenance-based npm publishing workflow.
 - Documented release configuration and n8n verification steps.
+
+## 0.0.1-alpha.25 — 2026-05-01
+
+### Changed
+
+- Same verification-ready package contents as alpha.26, published under the
+  `alpha` dist-tag only. Superseded by alpha.26 so npm's default `latest`
+  tag also points at the verification-ready package.
 
 ## 0.0.1-alpha.23 — 2026-04-29
 
