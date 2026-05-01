@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+
+  // eslint-plugin-n8n-nodes-base is loaded by FlatCompat via the string
+  // "plugin:n8n-nodes-base/{nodes,credentials}" in eslint.config.mjs, so it
+  // has no `import` statement for fallow's static analyzer to follow.
+  "ignoreDependencies": ["eslint-plugin-n8n-nodes-base"]
+}
