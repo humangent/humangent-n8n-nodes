@@ -285,6 +285,11 @@ function computeDriftSummary(
   const liveIds = liveOutcomes.map((o) => o.id);
   const liveById = new Map(liveOutcomes.map((o) => [o.id, o]));
   const snapshotById = new Map(snapshot.map((o) => [o.id, o]));
+  // `drifted` reflects ID-SET drift only; pure label renames live in
+  // `label_drift` so a consumer can distinguish "outcomes added /
+  // removed" (routing-impacting) from "labels changed" (display only).
+  // execute.test.ts pins this contract — see the
+  // "captures label_drift when an id is shared" case.
   const drifted =
     snapshotIds.length !== liveIds.length ||
     snapshotIds.some((id) => !liveById.has(id)) ||

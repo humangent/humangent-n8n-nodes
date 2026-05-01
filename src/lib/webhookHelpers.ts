@@ -37,7 +37,10 @@ function readRawBody(ctx: IWebhookFunctions): string {
   if (raw && typeof (raw as Buffer).toString === "function") {
     return (raw as Buffer).toString("utf8");
   }
-  return JSON.stringify(parsed);
+  // `JSON.stringify(undefined)` is `undefined`, not a string. Coalesce
+  // so signature verification gets a real string and reports
+  // `invalid_signature` cleanly instead of crashing on a TypeError.
+  return JSON.stringify(parsed) ?? "";
 }
 
 export function denyWith(
