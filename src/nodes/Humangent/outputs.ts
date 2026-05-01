@@ -43,59 +43,69 @@ type OutputConfig = {
   displayName: string;
 };
 
+// configuredOutputs is `.toString()`-interpolated into an n8n
+// expression in Humangent.node.ts (`outputs: ={{(${fn.toString()})(...)}}`)
+// and runs in n8n's expression sandbox. It cannot import helpers from
+// other modules — every helper it uses must be DECLARED INSIDE the
+// function body so it travels with the stringified source. The nested
+// functions below are an explicit restructuring to keep the top-level
+// branching shallow without violating the sandbox constraint.
 export function configuredOutputs(parameter: unknown): OutputConfig[] {
+  function decodeSnapshotEntries(value: string): unknown {
+    // Find the LAST `#o=` marker so any future suffix structure stays
+    // appendable (currently only `#o=` is defined; the lastIndexOf
+    // keeps us robust).
+    const marker = "#o=";
+    const idx = value.lastIndexOf(marker);
+    if (idx < 0) return null;
+    const encoded = value.slice(idx + marker.length);
+    try {
+      return JSON.parse(decodeURIComponent(encoded));
+    } catch {
+      return null;
+    }
+  }
+
+  function readLabel(item: unknown): string | null {
+    if (!item || typeof item !== "object") return null;
+    const id = (item as { id?: unknown }).id;
+    const label = (item as { label?: unknown }).label;
+    if (typeof id !== "string" || id.length === 0) return null;
+    if (typeof label !== "string" || label.length === 0) return null;
+    return label;
+  }
+
   if (!parameter || typeof parameter !== "object") return [];
   const p = parameter as { taskType?: unknown; mode?: unknown };
+
   // alpha.21 detached `Create` mode short-circuit. The source-side
   // Humangent node returns immediately on a single Main output of
   // {requestId, requestUrl, expectedTimeoutAt} — the per-outcome /
   // Dismissed / Timed Out branches live on the destination Continue
-  // node, not here. Render a single `Created` lane so the canvas
-  // shape matches what execute() actually emits; otherwise the
-  // detached payload would land on what the canvas labels as the
-  // first task-type outcome.
-  //
-  // The Humangent Continue node never sets `mode` on its parameters
-  // (its descriptor doesn't declare the property), so $parameter.mode
-  // is undefined there and we fall through to the snapshot-driven
-  // path that renders Continue's per-outcome branches.
+  // node, not here. The Humangent Continue node never sets `mode`
+  // on its parameters, so $parameter.mode is undefined there and we
+  // fall through to the snapshot-driven branches.
   if (p.mode === "create") {
     return [{ type: "main", displayName: "Created" }];
   }
-  const value = p.taskType;
+
   // n8n's WorkflowDataProxy unwraps resourceLocator parameters to
-  // their `.value` string before reaching this function. We accept
-  // STRINGS only — older workflows that arrived as the full RL
-  // object (alpha.10–alpha.13) will return [] here, which renders
-  // a zero-output node and hints the author to re-pick.
+  // their `.value` string before reaching this function. STRINGS only
+  // — older workflows that arrived as the full RL object
+  // (alpha.10–alpha.13) return [] here, which renders a zero-output
+  // node and hints the author to re-pick.
+  const value = p.taskType;
   if (typeof value !== "string" || value.length === 0) return [];
 
-  // Find the LAST `#o=` marker so any future suffix structure stays
-  // appendable (currently only `#o=` is defined; an extra `?o=` in
-  // the id would be unusual but the lastIndexOf keeps us robust).
-  const marker = "#o=";
-  const idx = value.lastIndexOf(marker);
-  if (idx < 0) return [];
-
-  const encoded = value.slice(idx + marker.length);
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(decodeURIComponent(encoded));
-  } catch {
-    return [];
-  }
-
+  const decoded = decodeSnapshotEntries(value);
   if (!Array.isArray(decoded) || decoded.length === 0) return [];
 
-  // Validate the WHOLE array. Any malformed item rejects the entire
+  // Whole-array validation. Any malformed item rejects the entire
   // snapshot — a half-rendered canvas is worse than no canvas.
   const named: OutputConfig[] = [];
   for (const item of decoded) {
-    if (!item || typeof item !== "object") return [];
-    const id = (item as { id?: unknown }).id;
-    const label = (item as { label?: unknown }).label;
-    if (typeof id !== "string" || id.length === 0) return [];
-    if (typeof label !== "string" || label.length === 0) return [];
+    const label = readLabel(item);
+    if (label === null) return [];
     named.push({ type: "main", displayName: label });
   }
 

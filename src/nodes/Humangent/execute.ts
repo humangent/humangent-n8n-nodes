@@ -57,6 +57,7 @@ import {
   type HumangentCredentials,
 } from "../../lib/api";
 import type { Outcome } from "../../lib/schemas";
+import { extractTaskTypeId } from "../../lib/taskTypeValue";
 import {
   buildEmptyBranches,
   decodeSnapshot,
@@ -92,14 +93,6 @@ function buildDetachedExecutionHint(args: {
   const taskTypeLabel = args.resolvedTaskTypeName ?? "(unresolved)";
   const url = args.requestUrl ?? "(no URL)";
   return `Review request created. Decision will be delivered to Continue node \`${continueLabel}\` (Task Type: \`${taskTypeLabel}\`) when the reviewer decides — view request: ${url}.`;
-}
-
-// `lastIndexOf` for parity with the decoders — the snapshot marker is
-// always the LAST `#o=` so any earlier substrings in a malformed /
-// hand-edited value don't truncate the id prefix.
-function parseTaskTypeId(rawValue: string): string {
-  const markerIdx = rawValue.lastIndexOf("#o=");
-  return markerIdx < 0 ? rawValue : rawValue.slice(0, markerIdx);
 }
 
 // n8n's editor descriptor declares limitWaitTime as a number with
@@ -190,7 +183,7 @@ async function parseExecuteParameters(
   };
   const rawValue =
     typeof taskTypeParam?.value === "string" ? taskTypeParam.value.trim() : "";
-  const taskTypeId = parseTaskTypeId(rawValue);
+  const taskTypeId = extractTaskTypeId(rawValue);
 
   // Resource-mapper output shape. n8n's editor produces
   // `{ mappingMode, value: {…} | null, ...}` but a saved workflow
@@ -516,6 +509,87 @@ interface DetachedCreateInput {
   parentRequestIdRaw: string;
 }
 
+// n8n's `workflowSelector` persists either a string id or an
+// `{ value, mode, cachedResultName }` resourceLocator-shaped object
+// depending on n8n version + how the user picked it; the wire only
+// needs the workflow id.
+function readContinueWorkflowId(param: unknown): string {
+  if (typeof param === "string") return param.trim();
+  const value = (param as { value?: unknown } | null | undefined)?.value;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function parseDetachedPickerPair(ctx: IExecuteFunctions): {
+  continueWorkflowId: string;
+  continueNodeName: string;
+} {
+  const continueWorkflowId = readContinueWorkflowId(
+    ctx.getNodeParameter("continueWorkflow", 0, ""),
+  );
+  const rawName = ctx.getNodeParameter("continueNodeName", 0, "");
+  const continueNodeName = typeof rawName === "string" ? rawName.trim() : "";
+
+  if (continueWorkflowId.length === 0) {
+    throw new NodeOperationError(
+      ctx.getNode(),
+      "Pick the destination Continuation Workflow before running this node in Create mode.",
+    );
+  }
+  if (continueNodeName.length === 0) {
+    throw new NodeOperationError(
+      ctx.getNode(),
+      "Type the destination Humangent Continue node's name before running this node in Create mode.",
+    );
+  }
+  return { continueWorkflowId, continueNodeName };
+}
+
+function requireInstanceId(
+  ctx: IExecuteFunctions,
+  creds: HumangentCredentials,
+): string {
+  const instanceId =
+    typeof creds.instanceId === "string" ? creds.instanceId.trim() : "";
+  if (instanceId.length === 0) {
+    throw new NodeOperationError(
+      ctx.getNode(),
+      "Humangent credential is missing its auto-minted instance ID. Save the Humangent credential once so the credential's preAuthentication hook can mint the value, then re-run this node.",
+    );
+  }
+  return instanceId;
+}
+
+function emitDetachedExecutionHints(
+  ctx: IExecuteFunctions,
+  data: {
+    decision_callback_resolved?: {
+      continue_node_name?: string;
+      task_type_name?: string;
+    };
+    request_url?: string | null;
+    task_type_drift_warning?: unknown;
+  },
+): void {
+  const resolved = data.decision_callback_resolved;
+  ctx.addExecutionHints({
+    message: buildDetachedExecutionHint({
+      resolvedContinueName: resolved?.continue_node_name,
+      resolvedTaskTypeName: resolved?.task_type_name,
+      requestUrl: data.request_url,
+    }),
+    type: "info",
+    location: "outputPane",
+  });
+  if (data.task_type_drift_warning !== undefined) {
+    ctx.addExecutionHints({
+      message:
+        "Task type drift detected: this workflow's saved outcomes don't match the task type's current outcomes. Re-pick the task type to refresh the snapshot.",
+      type: "warning",
+      location: "outputPane",
+    });
+  }
+}
+
 /**
  * Detached-mode (Create) branch. Validates the picker pair, mints a
  * `decision_callback` block, and returns a single Main-output array
@@ -529,50 +603,15 @@ async function executeDetachedCreate(
   this: IExecuteFunctions,
   input: DetachedCreateInput,
 ): Promise<INodeExecutionData[][]> {
-  const continueWorkflowParam = this.getNodeParameter(
-    "continueWorkflow",
-    0,
-    "",
+  const { continueWorkflowId, continueNodeName } = parseDetachedPickerPair(
+    this,
   );
-  // n8n's `workflowSelector` persists either a string id or an
-  // `{ value, mode, cachedResultName }` resourceLocator-shaped
-  // object depending on n8n version + how the user picked it; the
-  // wire only needs the workflow id.
-  const continueWorkflowId =
-    typeof continueWorkflowParam === "string"
-      ? continueWorkflowParam.trim()
-      : typeof (continueWorkflowParam as { value?: unknown })?.value ===
-          "string"
-        ? (continueWorkflowParam as { value: string }).value.trim()
-        : "";
-  const continueNodeNameRaw = this.getNodeParameter("continueNodeName", 0, "");
-  const continueNodeName =
-    typeof continueNodeNameRaw === "string" ? continueNodeNameRaw.trim() : "";
+  const instanceId = requireInstanceId(this, input.creds);
 
-  if (continueWorkflowId.length === 0) {
-    throw new NodeOperationError(
-      this.getNode(),
-      "Pick the destination Continuation Workflow before running this node in Create mode.",
-    );
-  }
-  if (continueNodeName.length === 0) {
-    throw new NodeOperationError(
-      this.getNode(),
-      "Type the destination Humangent Continue node's name before running this node in Create mode.",
-    );
-  }
-
-  const instanceId =
-    typeof input.creds.instanceId === "string"
-      ? input.creds.instanceId.trim()
-      : "";
-  if (instanceId.length === 0) {
-    throw new NodeOperationError(
-      this.getNode(),
-      "Humangent credential is missing its auto-minted instance ID. Save the Humangent credential once so the credential's preAuthentication hook can mint the value, then re-run this node.",
-    );
-  }
-
+  // Detached path: drift travels in decision_callback so the backend
+  // can validate against the resolved subscription's task type and
+  // surface task_type_drift_warning advisories on the response.
+  // Metadata stays as the n8n exec/workflow/node trio only.
   const decisionCallback: DecisionCallback = {
     workflow_id: continueWorkflowId,
     node_id: continueNodeName,
@@ -580,11 +619,6 @@ async function executeDetachedCreate(
     limit_wait_time_seconds: input.waitSeconds,
     n8n_drift: input.driftSummary as unknown as Record<string, unknown>,
   };
-  // Detached path metadata is the same n8n exec/workflow/node trio
-  // as inline (omit n8n_drift here — drift travels in
-  // decision_callback so the backend can validate against the
-  // resolved subscription's task type and surface
-  // task_type_drift_warning advisories on the response).
   const metadata = {
     n8n_execution_id: this.getExecutionId(),
     n8n_workflow_id: this.getWorkflow().id,
@@ -604,24 +638,7 @@ async function executeDetachedCreate(
     throw humangentApiError(this.getNode(), result);
   }
 
-  const resolved = result.data.decision_callback_resolved;
-  this.addExecutionHints({
-    message: buildDetachedExecutionHint({
-      resolvedContinueName: resolved?.continue_node_name,
-      resolvedTaskTypeName: resolved?.task_type_name,
-      requestUrl: result.data.request_url,
-    }),
-    type: "info",
-    location: "outputPane",
-  });
-  if (result.data.task_type_drift_warning !== undefined) {
-    this.addExecutionHints({
-      message:
-        "Task type drift detected: this workflow's saved outcomes don't match the task type's current outcomes. Re-pick the task type to refresh the snapshot.",
-      type: "warning",
-      location: "outputPane",
-    });
-  }
+  emitDetachedExecutionHints(this, result.data);
 
   return [
     [

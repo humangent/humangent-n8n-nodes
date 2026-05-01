@@ -40,6 +40,7 @@ import {
   unregisterSubscription,
   type HumangentCredentials,
 } from "../../lib/api";
+import { extractTaskTypeId } from "../../lib/taskTypeValue";
 import { requesterFor } from "../Humangent/n8nBridge";
 
 const STATIC_KEY = "humangentContinueSubscription";
@@ -72,12 +73,9 @@ function clearSubscriptionData(ctx: IHookFunctions): void {
   delete staticData[STATIC_KEY];
 }
 
-/**
- * Decode the Task Type ID from the resourceLocator's `value`. The
- * value carries `<task-type-id>#o=<encoded-snapshot>`; we strip the
- * `#o=` suffix to get the bare UUID. Mirrors the same `lastIndexOf`
- * pattern from `Humangent/execute.ts`.
- */
+// Decode the Task Type ID from the resourceLocator's `value`. The
+// value carries `<task-type-id>#o=<encoded-snapshot>`; we strip the
+// `#o=` suffix via the shared `extractTaskTypeId` helper.
 function readTaskTypeId(ctx: IHookFunctions): string {
   const taskTypeParam = ctx.getNodeParameter("taskType", undefined) as
     | { value?: unknown }
@@ -92,9 +90,7 @@ function readTaskTypeId(ctx: IHookFunctions): string {
   ) {
     raw = (taskTypeParam as { value: string }).value;
   }
-  raw = raw.trim();
-  const markerIdx = raw.lastIndexOf("#o=");
-  return markerIdx < 0 ? raw : raw.slice(0, markerIdx);
+  return extractTaskTypeId(raw.trim());
 }
 
 /**

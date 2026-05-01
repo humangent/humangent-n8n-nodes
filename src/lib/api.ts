@@ -278,7 +278,7 @@ export interface ListTaskTypesParams {
   p_include_archived?: boolean;
 }
 
-export async function listTaskTypes(
+export async function listTaskTypesApi(
   requester: HttpRequester,
   creds: HumangentCredentials,
   params: ListTaskTypesParams = {},

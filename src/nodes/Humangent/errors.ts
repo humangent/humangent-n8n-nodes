@@ -134,31 +134,43 @@ export function buildEmptyBranches(total: number): INodeExecutionData[][] {
  * no render. Whole-array validation: any malformed item rejects the
  * entire snapshot.
  */
+function decodeSnapshotPayload(value: string): unknown {
+  const marker = "#o=";
+  const idx = value.lastIndexOf(marker);
+  if (idx < 0) return null;
+  const encoded = value.slice(idx + marker.length);
+  try {
+    return JSON.parse(decodeURIComponent(encoded));
+  } catch {
+    return null;
+  }
+}
+
+function parseSnapshotItem(
+  item: unknown,
+): { id: string; label: string } | null {
+  if (!item || typeof item !== "object") return null;
+  const id = (item as { id?: unknown }).id;
+  const label = (item as { label?: unknown }).label;
+  if (typeof id !== "string" || id.length === 0) return null;
+  if (typeof label !== "string" || label.length === 0) return null;
+  return { id, label };
+}
+
 export function decodeSnapshot(
   value: string | undefined | null,
 ): Array<{ id: string; label: string }> {
-  if (typeof value !== "string" || value.length === 0) {
-    return [];
-  }
-  const marker = "#o=";
-  const idx = value.lastIndexOf(marker);
-  if (idx < 0) return [];
-  const encoded = value.slice(idx + marker.length);
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(decodeURIComponent(encoded));
-  } catch {
-    return [];
-  }
+  if (typeof value !== "string" || value.length === 0) return [];
+  const decoded = decodeSnapshotPayload(value);
   if (!Array.isArray(decoded) || decoded.length === 0) return [];
+
+  // Whole-array validation: any malformed item rejects the entire
+  // snapshot — a half-rendered canvas is worse than no canvas.
   const out: Array<{ id: string; label: string }> = [];
   for (const item of decoded) {
-    if (!item || typeof item !== "object") return [];
-    const id = (item as { id?: unknown }).id;
-    const label = (item as { label?: unknown }).label;
-    if (typeof id !== "string" || id.length === 0) return [];
-    if (typeof label !== "string" || label.length === 0) return [];
-    out.push({ id, label });
+    const parsed = parseSnapshotItem(item);
+    if (parsed === null) return [];
+    out.push(parsed);
   }
   return out;
 }

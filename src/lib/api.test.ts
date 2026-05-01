@@ -4,7 +4,7 @@ import {
   callRpc,
   createRequest,
   getTaskType,
-  listTaskTypes,
+  listTaskTypesApi,
   registerSubscription,
   unregisterSubscription,
   type HttpRequester,
@@ -185,13 +185,13 @@ describe("callRpc error mapping", () => {
   });
 });
 
-describe("listTaskTypes", () => {
+describe("listTaskTypesApi", () => {
   it("returns parsed data on a valid response", async () => {
     const { requester } = requesterReturning({
       items: [VALID_TASK_TYPE_ROW],
       next_cursor: null,
     });
-    const result = await listTaskTypes(requester, CREDS);
+    const result = await listTaskTypesApi(requester, CREDS);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.items).toHaveLength(1);
@@ -204,7 +204,7 @@ describe("listTaskTypes", () => {
       items: "not an array",
       next_cursor: null,
     });
-    const result = await listTaskTypes(requester, CREDS);
+    const result = await listTaskTypesApi(requester, CREDS);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("malformed_response");
   });
@@ -214,7 +214,7 @@ describe("listTaskTypes", () => {
       items: [],
       next_cursor: null,
     });
-    await listTaskTypes(requester, CREDS, { p_limit: 25 });
+    await listTaskTypesApi(requester, CREDS, { p_limit: 25 });
     const body = spy.mock.calls[0][0].body;
     expect(body).toEqual({ p_limit: 25 });
   });
@@ -229,7 +229,7 @@ describe("listTaskTypes", () => {
         },
       },
     });
-    const result = await listTaskTypes(requester, CREDS);
+    const result = await listTaskTypesApi(requester, CREDS);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("missing_or_invalid_api_key");
   });

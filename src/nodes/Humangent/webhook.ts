@@ -48,58 +48,14 @@ import type {
 } from "n8n-workflow";
 
 import type { HumangentCredentials } from "../../lib/api";
-import { verifySignature } from "../../lib/hmac";
-import {
-  DecisionDeliverySchema,
-  type DecisionDelivery,
-} from "../../lib/schemas";
+import { type DecisionDelivery } from "../../lib/schemas";
+import { verifyAndParseDelivery } from "../../lib/webhookHelpers";
 import { buildEmptyBranches, decodeSnapshot } from "./errors";
 
-const SIGNATURE_HEADER_LOWER = "x-humangent-signature";
 const DELIVERY_ID_HEADER_LOWER = "x-humangent-delivery-id";
 const TEST_MODE_HEADER_LOWER = "x-humangent-test-mode";
 
-/**
- * Extract the raw UTF-8 body bytes n8n received. When n8n's request
- * object carries the raw buffer / string (most production setups do
- * via body-parser's `verify` callback), use it directly — that's
- * the exact byte string deliver-decision signed. Otherwise re-encode
- * the parsed body via JSON.stringify.
- *
- * The fallback is best-effort: for the narrow payload
- * deliver-decision emits (flat object, string keys, no Unicode
- * escapes), JSON.stringify after JSON.parse reproduces the bytes
- * exactly — V8 preserves insertion order on round-trip. If n8n ever
- * augments the parsed body with synthetic keys, verification will
- * fail loudly (401) rather than silently accept a tampered payload.
- */
-function readRawBody(ctx: IWebhookFunctions): string {
-  const parsed = ctx.getBodyData();
-  const req = ctx.getRequestObject() as {
-    rawBody?: string | Buffer;
-  } | null;
-  const raw = req?.rawBody;
-  if (typeof raw === "string") return raw;
-  if (raw && typeof (raw as Buffer).toString === "function") {
-    return (raw as Buffer).toString("utf8");
-  }
-  return JSON.stringify(parsed);
-}
-
-function denyWith(
-  status: number,
-  body: Record<string, unknown>,
-): IWebhookResponseData {
-  return {
-    webhookResponse: {
-      status,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  };
-}
-
-export function decisionItem(
+function decisionItem(
   delivery: DecisionDelivery,
   drift?: { unmatched_outcome_id: string },
 ): INodeExecutionData {
@@ -143,68 +99,32 @@ export function decisionItem(
   return { json };
 }
 
-export async function webhookResume(
-  this: IWebhookFunctions,
-): Promise<IWebhookResponseData> {
-  const creds = (await this.getCredentials(
-    "humangentApi",
-  )) as unknown as HumangentCredentials;
-  const headers = this.getHeaderData() as Record<string, string | undefined>;
-
-  const signatureHeader = headers[SIGNATURE_HEADER_LOWER];
-  // The x-humangent-delivery-id / x-humangent-test-mode headers are
-  // NOT part of the HMAC envelope — they're hints sent alongside for
-  // logging + pgmq retry-dedupe at the transport layer. We never
-  // trust them over the signed body fields.
-  void headers[DELIVERY_ID_HEADER_LOWER];
-  void headers[TEST_MODE_HEADER_LOWER];
-
-  const rawBody = readRawBody(this);
-
-  // HMAC secret IS the API key plaintext. The Humangent backend signs
-  // decision deliveries with the same value the node uses to
-  // authenticate outbound calls — one secret, two directions.
-  const verifyResult = verifySignature({
-    header: signatureHeader,
-    body: rawBody,
-    secret: creds.apiKey,
-    now: Math.floor(Date.now() / 1000),
-  });
-
-  if (!verifyResult.valid) {
-    return denyWith(401, {
-      error: "invalid_signature",
-      reason: verifyResult.reason,
-    });
-  }
-
-  const parsedBody = this.getBodyData();
-  const parsed = DecisionDeliverySchema.safeParse(parsedBody);
-  if (!parsed.success) {
-    return denyWith(400, {
-      error: "malformed_decision_payload",
-      detail: parsed.error.message,
-    });
-  }
-  const delivery = parsed.data;
-
-  // Decode the snapshot from the saved workflow's resourceLocator
-  // value (captured at task-type pick time by listSearch.ts's
-  // `encodeTaskTypeValue`). Branch indices are snapshot-driven so
-  // the canvas (configuredOutputs in outputs.ts) and the runtime
-  // routing here agree by construction.
-  const taskTypeParam = this.getNodeParameter("taskType") as {
-    value?: unknown;
-  } | null;
-  const rawValue =
-    typeof taskTypeParam?.value === "string" ? taskTypeParam.value : "";
-  const snapshot = decodeSnapshot(rawValue);
+/**
+ * Snapshot-driven branch routing shared between the inline node and
+ * Humangent Continue. The two callers diverge on whether
+ * `outcome_id === options.timedOutOutcomeId` should route to a
+ * separate Timed Out lane: inline waits get their Timed Out emit
+ * synthesized by execute.ts on n8n's waitTill expiry, while Continue
+ * receives an explicit `timed_out` outcome from deliver-decision.
+ * Pass `timedOutOutcomeId: undefined` (the default) to skip that
+ * branch.
+ */
+export function routeDecisionToBranches(
+  delivery: DecisionDelivery,
+  snapshot: ReadonlyArray<{ id: string; label: string }>,
+  options: { timedOutOutcomeId?: string } = {},
+): IWebhookResponseData {
   const totalBranches = snapshot.length + 2; // + Dismissed + Timed Out
   const dismissedIndex = snapshot.length;
-
+  const timedOutIndex = snapshot.length + 1;
   const branches = buildEmptyBranches(totalBranches);
 
-  if (delivery.is_dismiss) {
+  if (
+    options.timedOutOutcomeId !== undefined &&
+    delivery.outcome_id === options.timedOutOutcomeId
+  ) {
+    branches[timedOutIndex] = [decisionItem(delivery)];
+  } else if (delivery.is_dismiss) {
     branches[dismissedIndex] = [decisionItem(delivery)];
   } else {
     const matchedIndex = snapshot.findIndex(
@@ -233,4 +153,37 @@ export async function webhookResume(
     },
     workflowData: branches,
   };
+}
+
+export async function webhookResume(
+  this: IWebhookFunctions,
+): Promise<IWebhookResponseData> {
+  const creds = (await this.getCredentials(
+    "humangentApi",
+  )) as unknown as HumangentCredentials;
+
+  // The x-humangent-delivery-id / x-humangent-test-mode headers are
+  // NOT part of the HMAC envelope — they're hints sent alongside for
+  // logging + pgmq retry-dedupe at the transport layer. We never
+  // trust them over the signed body fields.
+  const headers = this.getHeaderData() as Record<string, string | undefined>;
+  void headers[DELIVERY_ID_HEADER_LOWER];
+  void headers[TEST_MODE_HEADER_LOWER];
+
+  const verified = await verifyAndParseDelivery(this, creds);
+  if (!verified.ok) return verified.response;
+  const delivery = verified.delivery;
+
+  // Decode the snapshot from the saved workflow's resourceLocator
+  // value (captured at task-type pick time by listSearch.ts's
+  // `encodeTaskTypeValue`). Branch indices are snapshot-driven so
+  // the canvas (configuredOutputs in outputs.ts) and the runtime
+  // routing here agree by construction.
+  const taskTypeParam = this.getNodeParameter("taskType") as {
+    value?: unknown;
+  } | null;
+  const rawValue =
+    typeof taskTypeParam?.value === "string" ? taskTypeParam.value : "";
+  const snapshot = decodeSnapshot(rawValue);
+  return routeDecisionToBranches(delivery, snapshot);
 }
