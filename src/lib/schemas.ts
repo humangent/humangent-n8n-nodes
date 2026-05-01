@@ -9,7 +9,7 @@ type SafeParseResult<T> =
   | { success: true; data: T }
   | { success: false; error: { message: string } };
 
-export interface RuntimeSchema<T> {
+interface RuntimeSchema<T> {
   safeParse(value: unknown): SafeParseResult<T>;
 }
 
@@ -479,8 +479,6 @@ function parseChainEntry(value: unknown, path: string): ChainEntry {
     reason: optionalNullable(source, "reason", path, string),
   };
 }
-
-export const ChainEntrySchema = schema(parseChainEntry);
 
 const TARGET_KINDS = ["inline", "subscription"] as const;
 const DECIDED_VIA = ["human", "auto_approve"] as const;

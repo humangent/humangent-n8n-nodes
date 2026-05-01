@@ -28,7 +28,7 @@ import type {
   INodeListSearchResult,
 } from "n8n-workflow";
 
-import { listTaskTypes as listTaskTypesApi } from "../../lib/api";
+import { listTaskTypesApi } from "../../lib/api";
 import type { HumangentCredentials } from "../../lib/api";
 import type { Outcome } from "../../lib/schemas";
 import { requesterFor } from "./n8nBridge";
@@ -51,20 +51,6 @@ export function encodeTaskTypeValue(
   const minimal = outcomes.map((o) => ({ id: o.id, label: o.label }));
   const fragment = encodeURIComponent(JSON.stringify(minimal));
   return `${taskTypeId}#o=${fragment}`;
-}
-
-/**
- * Recover the bare task type id from an encoded value string. Tests
- * + execute() / webhook() share this so behavior stays consistent.
- *
- * Uses `lastIndexOf` to match the decoders (`configuredOutputs` and
- * `decodeSnapshot`); the marker is always the LAST `#o=` so any
- * malformed or hand-edited values with earlier `#o=` substrings
- * still split on the snapshot boundary, not the prefix.
- */
-export function extractTaskTypeId(encodedValue: string): string {
-  const idx = encodedValue.lastIndexOf("#o=");
-  return idx < 0 ? encodedValue : encodedValue.slice(0, idx);
 }
 
 export async function listTaskTypes(

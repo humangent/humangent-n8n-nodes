@@ -35,12 +35,10 @@ import type {
 } from "n8n-workflow";
 
 import type { HumangentCredentials } from "../../lib/api";
-import { verifySignature } from "../../lib/hmac";
-import { DecisionDeliverySchema } from "../../lib/schemas";
-import { buildEmptyBranches, decodeSnapshot } from "../Humangent/errors";
-import { decisionItem } from "../Humangent/webhook";
+import { denyWith, verifyAndParseDelivery } from "../../lib/webhookHelpers";
+import { decodeSnapshot } from "../Humangent/errors";
+import { routeDecisionToBranches } from "../Humangent/webhook";
 
-const SIGNATURE_HEADER_LOWER = "x-humangent-signature";
 const SEEN_KEY = "humangentContinueSeenDeliveries";
 const SEEN_MAX_ENTRIES = 100;
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
@@ -49,37 +47,6 @@ const TIMED_OUT_OUTCOME_ID = "timed_out";
 interface SeenEntry {
   id: string;
   ts: number;
-}
-
-function readRawBody(ctx: IWebhookFunctions): string {
-  // Same pattern as inline `webhookResume`: prefer the raw bytes
-  // n8n's body-parser captured (when available), otherwise re-encode
-  // the parsed body via JSON.stringify. Continue's payload is the
-  // same flat shape deliver-decision emits, so insertion-order
-  // round-trip via V8 is reliable.
-  const parsed = ctx.getBodyData();
-  const req = ctx.getRequestObject() as {
-    rawBody?: string | Buffer;
-  } | null;
-  const raw = req?.rawBody;
-  if (typeof raw === "string") return raw;
-  if (raw && typeof (raw as Buffer).toString === "function") {
-    return (raw as Buffer).toString("utf8");
-  }
-  return JSON.stringify(parsed);
-}
-
-function denyWith(
-  status: number,
-  body: Record<string, unknown>,
-): IWebhookResponseData {
-  return {
-    webhookResponse: {
-      status,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  };
 }
 
 function filterByTtl(seen: SeenEntry[], now: number): SeenEntry[] {
@@ -115,35 +82,10 @@ export async function continueWebhookHandler(
   const creds = (await this.getCredentials(
     "humangentApi",
   )) as unknown as HumangentCredentials;
-  const headers = this.getHeaderData() as Record<string, string | undefined>;
 
-  const signatureHeader = headers[SIGNATURE_HEADER_LOWER];
-  const rawBody = readRawBody(this);
-
-  // HMAC secret = API key plaintext (one secret, two directions —
-  // see inline webhook.ts comment).
-  const verifyResult = verifySignature({
-    header: signatureHeader,
-    body: rawBody,
-    secret: creds.apiKey,
-    now: Math.floor(Date.now() / 1000),
-  });
-  if (!verifyResult.valid) {
-    return denyWith(401, {
-      error: "invalid_signature",
-      reason: verifyResult.reason,
-    });
-  }
-
-  const parsedBody = this.getBodyData();
-  const parsed = DecisionDeliverySchema.safeParse(parsedBody);
-  if (!parsed.success) {
-    return denyWith(400, {
-      error: "malformed_decision_payload",
-      detail: parsed.error.message,
-    });
-  }
-  const delivery = parsed.data;
+  const verified = await verifyAndParseDelivery(this, creds);
+  if (!verified.ok) return verified.response;
+  const delivery = verified.delivery;
 
   // R27 audience-claim check. Continue only receives subscription-
   // bound deliveries; an inline-bound payload reaching this URL is
@@ -204,42 +146,7 @@ export async function continueWebhookHandler(
   const rawValue =
     typeof taskTypeParam?.value === "string" ? taskTypeParam.value : "";
   const snapshot = decodeSnapshot(rawValue);
-  const totalBranches = snapshot.length + 2; // + Dismissed + Timed Out
-  const dismissedIndex = snapshot.length;
-  const timedOutIndex = snapshot.length + 1;
-
-  const branches = buildEmptyBranches(totalBranches);
-
-  if (delivery.outcome_id === TIMED_OUT_OUTCOME_ID) {
-    branches[timedOutIndex] = [decisionItem(delivery)];
-  } else if (delivery.is_dismiss) {
-    branches[dismissedIndex] = [decisionItem(delivery)];
-  } else {
-    const matchedIndex = snapshot.findIndex(
-      (o) => o.id === delivery.outcome_id,
-    );
-    if (matchedIndex >= 0) {
-      branches[matchedIndex] = [decisionItem(delivery)];
-    } else {
-      // Drift fallback: backend sent a real outcome that the
-      // saved snapshot doesn't know about (the task type's author
-      // added an outcome between save and delivery). Route to
-      // Dismissed with drift_detected: true so the workflow can
-      // react instead of silently dropping the decision.
-      branches[dismissedIndex] = [
-        decisionItem(delivery, {
-          unmatched_outcome_id: delivery.outcome_id,
-        }),
-      ];
-    }
-  }
-
-  return {
-    webhookResponse: {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ok: true }),
-    },
-    workflowData: branches,
-  };
+  return routeDecisionToBranches(delivery, snapshot, {
+    timedOutOutcomeId: TIMED_OUT_OUTCOME_ID,
+  });
 }

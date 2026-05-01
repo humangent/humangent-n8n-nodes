@@ -24,6 +24,7 @@ import type {
 import { getTaskType } from "../../lib/api";
 import type { HumangentCredentials } from "../../lib/api";
 import type { FieldType } from "../../lib/fieldTypes";
+import { extractTaskTypeId } from "../../lib/taskTypeValue";
 import { requesterFor } from "./n8nBridge";
 
 type ResourceMapperFieldType = NonNullable<ResourceMapperField["type"]>;
@@ -125,14 +126,12 @@ function readTaskTypeId(ctx: ILoadOptionsFunctions): string | undefined {
   // alpha.14+ encodes the outcomes snapshot inline as
   // `<task-type-id>#o=<encoded>` — the gateway expects a bare UUID for
   // `p_task_type_id`, so strip everything after the `#o=` marker
-  // before the API call. `lastIndexOf` for parity with the decoders.
+  // before the API call.
   const raw = ctx.getNodeParameter("taskType", undefined, {
     extractValue: true,
   });
   if (typeof raw !== "string" || raw.trim().length === 0) return undefined;
-  const trimmed = raw.trim();
-  const markerIdx = trimmed.lastIndexOf("#o=");
-  return markerIdx < 0 ? trimmed : trimmed.slice(0, markerIdx);
+  return extractTaskTypeId(raw.trim());
 }
 
 export async function getTaskTypeSchema(
