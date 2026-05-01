@@ -1,7 +1,11 @@
 {
   "name": "@humangent/n8n-nodes-humangent",
-  "version": "0.0.1-alpha.27",
+  "version": "0.0.1-alpha.28",
   "description": "First-party n8n node for Humangent — a human-in-the-loop inbox for n8n workflows.",
+  "author": {
+    "name": "Humangent",
+    "url": "https://github.com/humangent"
+  },
   "license": "MIT",
   "homepage": "https://github.com/humangent/humangent-n8n-nodes#readme",
   "bugs": {
