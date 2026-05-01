@@ -1,0 +1,26 @@
+{
+  "node": "@humangent/n8n-nodes-humangent.humangent",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["HITL"],
+  "subcategories": {
+    "HITL": ["Human in the Loop"]
+  },
+  "alias": [
+    "human",
+    "hitl",
+    "approval",
+    "review",
+    "inbox",
+    "decision",
+    "wait",
+    "humangent"
+  ],
+  "resources": {
+    "primaryDocumentation": [
+      {
+        "url": "https://humangent.io/docs/n8n-node"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+<!-- Placeholder Humangent brand mark for the n8n node picker.
+     Capital-H coral square per memory:feedback_brand_mark_direction.md.
+     Replace with the finalized vector once the landing team hands off
+     the production SVG. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" width="60" height="60">
+  <rect width="60" height="60" rx="12" fill="#EB6A4D"/>
+  <path
+    d="M18 14 L18 46 L24 46 L24 33 L36 33 L36 46 L42 46 L42 14 L36 14 L36 27 L24 27 L24 14 Z"
+    fill="#FFFFFF"
+  />
+</svg>

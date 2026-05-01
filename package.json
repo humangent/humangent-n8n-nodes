@@ -1,0 +1,74 @@
+{
+  "name": "@humangent/n8n-nodes-humangent",
+  "version": "0.0.1-alpha.25",
+  "description": "First-party n8n node for Humangent — a human-in-the-loop inbox for n8n workflows.",
+  "license": "MIT",
+  "homepage": "https://github.com/humangent/humangent-n8n-nodes#readme",
+  "bugs": {
+    "url": "https://github.com/humangent/humangent-n8n-nodes/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/humangent/humangent-n8n-nodes.git"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "n8n-community-node-package",
+    "humangent",
+    "hitl",
+    "human-in-the-loop",
+    "approval",
+    "review",
+    "inbox"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "nodes": [
+      "dist/nodes/Humangent/Humangent.node.js",
+      "dist/nodes/HumangentContinue/HumangentContinue.node.js"
+    ],
+    "credentials": [
+      "dist/credentials/HumangentApi.credentials.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "clean": "rm -rf dist coverage",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "pack:smoke": "bash scripts/pack-smoke.sh"
+  },
+  "peerDependencies": {
+    "n8n-workflow": ">=1.70.0"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.12.2",
+    "@vitest/coverage-v8": "^4.1.4",
+    "eslint": "^9.39.4",
+    "eslint-plugin-n8n-nodes-base": "^1.16.6",
+    "globals": "^17.4.0",
+    "n8n-workflow": "^2.16.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.0",
+    "vitest": "^4.1.4"
+  }
+}

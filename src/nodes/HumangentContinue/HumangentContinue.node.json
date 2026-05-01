@@ -1,0 +1,28 @@
+{
+  "node": "@humangent/n8n-nodes-humangent.humangentContinue",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["HITL"],
+  "subcategories": {
+    "HITL": ["Human in the Loop"]
+  },
+  "alias": [
+    "human",
+    "hitl",
+    "humangent",
+    "continue",
+    "humangent decision trigger",
+    "on-decision",
+    "decision",
+    "trigger",
+    "approval",
+    "review"
+  ],
+  "resources": {
+    "primaryDocumentation": [
+      {
+        "url": "https://humangent.io/docs/n8n-node"
+      }
+    ]
+  }
+}
