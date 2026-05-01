@@ -3,6 +3,14 @@
 All notable changes to `@humangent/n8n-nodes-humangent`. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 0.0.1-alpha.27 — 2026-05-01
+
+### Changed
+
+- Republished README/docs so npm no longer documents the removed
+  `NPM_PUBLISH_TAG` variable. The release workflow always publishes to
+  npm's `latest` dist-tag.
+
 ## 0.0.1-alpha.26 — 2026-05-01
 
 ### Changed
