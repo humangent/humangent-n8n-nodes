@@ -175,6 +175,13 @@ const description: INodeTypeDescription = {
       required: true,
       displayOptions: { show: { mode: ["createAndWait", "create"] } },
       typeOptions: {
+        // taskType is a resourceLocator. The watcher does NOT
+        // auto-unwrap to `.value` the way WorkflowDataProxy does in
+        // runtime expressions — point at the `.value` sub-path so the
+        // schema reloads when the user picks a different task type
+        // (matches the Postgres node's pattern, packages/nodes-base/
+        // nodes/Postgres/v2/actions/database/insert.operation.ts).
+        loadOptionsDependsOn: ["taskType.value"],
         resourceMapper: {
           resourceMapperMethod: "getTaskTypeSchema",
           mode: "add",
