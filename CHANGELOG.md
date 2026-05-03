@@ -3,6 +3,25 @@
 All notable changes to `@humangent/n8n-nodes-humangent`. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 0.1.0 — 2026-05-03
+
+First non-alpha release. The package has been stable across the
+alpha.10–alpha.28 series of canvas + webhook + resume fixes; this
+release graduates the version line.
+
+### Fixed
+
+- **Resource-mapper field schema now refreshes when the user picks a
+  different task type.** The `fields` resourceMapper had no declared
+  dependency on the `taskType` resourceLocator, so n8n only refetched
+  the schema when the user clicked the refresh icon next to the field
+  list — switching task types silently left the prior task type's
+  fields on the canvas. Adds `loadOptionsDependsOn: ["taskType.value"]`
+  to the field's typeOptions, matching the Postgres v2 node's pattern.
+  The `.value` sub-path is required because the watcher does not
+  auto-unwrap resourceLocator values the way `WorkflowDataProxy` does
+  in runtime expressions.
+
 ## 0.0.1-alpha.27 — 2026-05-01
 
 ### Changed
