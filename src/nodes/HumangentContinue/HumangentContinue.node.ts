@@ -51,7 +51,7 @@ const description: INodeTypeDescription = {
   subtitle:
     '={{$parameter["taskType"] ? "Continue" : "Pick a task type"}} · Continue',
   description:
-    "Receive a Humangent decision in a separate workflow when the source action node ran in Create mode. Routes onto the matching outcome branch.",
+    "Receive a Humangent decision in a separate workflow when the source Humangent node uses Create mode. Routes onto the matching outcome branch.",
   defaults: { name: "Humangent Continue" },
   inputs: [],
   outputs: `={{(${configuredOutputs.toString()})($parameter)}}`,
@@ -95,7 +95,7 @@ const description: INodeTypeDescription = {
         },
       ],
       description:
-        "Which task type's decisions this Continue should receive. Must match the task type the source Create node selects.",
+        "Which task type's decisions this Continue node should receive. Must match the source Humangent node's task type.",
     },
   ],
 };

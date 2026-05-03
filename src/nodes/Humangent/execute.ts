@@ -442,17 +442,16 @@ export async function executeCreateRequest(
     });
   }
 
-  // Inline path migration deprecation hint: when `Create and Wait`
-  // is configured for waits longer than 1 hour, surface a builder
-  // hint pointing at the detached-mode migration recipe in U7's
-  // README. The backend cap on detached is 90 days — anyone holding
-  // an inline execution open for >1h is the audience this hint
-  // targets. Skipping when waitSeconds is exactly 3600 keeps the
+  // When `Create and Wait` is configured for waits longer than 1
+  // hour, surface a builder hint pointing at the safer detached
+  // configuration. The backend cap on detached is 90 days — anyone
+  // holding an inline execution open for >1h is the audience this
+  // hint targets. Skipping when waitSeconds is exactly 3600 keeps the
   // default 1-hour configuration silent.
   if (waitSeconds > ONE_HOUR_SECONDS) {
     this.addExecutionHints({
       message:
-        "For waits beyond 1 hour, switch this node to the `Create` mode + a Humangent Continue node in another workflow. See the n8n-node README for the migration recipe.",
+        "For waits beyond 1 hour, switch this node to Create mode and receive the decision with a Humangent Continue node in another workflow.",
       type: "info",
       location: "outputPane",
     });
@@ -558,7 +557,7 @@ function requireInstanceId(
   if (instanceId.length === 0) {
     throw new NodeOperationError(
       ctx.getNode(),
-      "Humangent credential is missing its auto-minted instance ID. Save the Humangent credential once so the credential's preAuthentication hook can mint the value, then re-run this node.",
+      "Humangent credential is missing its n8n Instance ID. Open the Humangent credential, save it once, then re-run this node.",
     );
   }
   return instanceId;

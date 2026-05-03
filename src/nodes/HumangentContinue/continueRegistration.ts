@@ -114,7 +114,7 @@ export async function activationCreate(this: IHookFunctions): Promise<boolean> {
   if (instanceId.length === 0) {
     throw new NodeOperationError(
       this.getNode(),
-      "Humangent credential is missing its auto-minted instance ID. Open the Humangent credential and save it once so the credential's preAuthentication hook can mint the value, then re-activate the workflow.",
+      "Humangent credential is missing its n8n Instance ID. Open the Humangent credential, save it once, then re-activate the workflow.",
     );
   }
 

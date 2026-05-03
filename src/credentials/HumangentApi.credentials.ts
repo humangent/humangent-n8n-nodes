@@ -63,7 +63,7 @@ export class HumangentApi implements ICredentialType {
       required: true,
       placeholder: "hmk_live_... or hmk_test_...",
       description:
-        "Issued at /admin/api-keys. Authenticates outbound calls and verifies inbound decision webhooks. Use an `hmk_test_*` key for Test step runs.",
+        "API key from Humangent's admin console. Use an `hmk_test_*` key for testing and an `hmk_live_*` key for production.",
     },
     // Auto-minted UUID. Persisted by n8n after the first
     // preAuthentication run. Treated as opaque by the Humangent
@@ -96,7 +96,7 @@ export class HumangentApi implements ICredentialType {
       default: "",
       required: false,
       description:
-        "Auto-managed. Do not edit. Populated by the credential's preAuthentication hook on first authenticated request and used by the Humangent Continue node to disambiguate n8n instances that share the same workflow JSON across dev / prod.",
+        "Auto-managed. Leave this unchanged unless Humangent support asks you to edit it.",
     },
   ];
 
