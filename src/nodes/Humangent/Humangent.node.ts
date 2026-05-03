@@ -134,14 +134,13 @@ const description: INodeTypeDescription = {
         {
           name: "Create and Wait",
           value: "createAndWait",
-          description:
-            "Pause this workflow until the reviewer decides. Bounded by EXECUTIONS_TIMEOUT_MAX.",
+          description: "Pause this workflow until the reviewer decides",
         },
         {
           name: "Create",
           value: "create",
           description:
-            "Create the request and continue. A separate workflow with a Humangent Continue node receives the decision. Use for reviews longer than EXECUTIONS_TIMEOUT_MAX.",
+            "Create the request and continue immediately. Use a Humangent Continue node in another workflow to receive the decision.",
         },
       ],
     },
@@ -219,7 +218,7 @@ const description: INodeTypeDescription = {
       displayOptions: { show: { mode: ["create"] } },
       placeholder: "e.g., Humangent Continue",
       description:
-        "Type the destination Continue node's name as it appears in the chosen workflow. The execution result echoes the resolved Continue's display name + Task Type so you can confirm the destination after the first run.",
+        "Enter the destination Humangent Continue node name exactly as it appears in the selected workflow",
     },
     {
       displayName: "Limit Wait Time",
@@ -238,7 +237,7 @@ const description: INodeTypeDescription = {
       default: "hours",
       displayOptions: { show: { mode: ["createAndWait", "create"] } },
       description:
-        "Unit applied to Limit Wait Time. In Create and Wait mode your n8n instance's EXECUTIONS_TIMEOUT_MAX can still end the execution first. In Create mode the backend enforces the timeout server-side and the EXECUTIONS_TIMEOUT_MAX cap does not apply (max 90 days).",
+        "Unit applied to Limit Wait Time. For long reviews, use Create mode with a Humangent Continue node in another workflow.",
       options: [
         { name: "Minutes", value: "minutes" },
         { name: "Hours", value: "hours" },
@@ -263,7 +262,7 @@ const description: INodeTypeDescription = {
       displayOptions: { show: { mode: ["createAndWait", "create"] } },
       placeholder: "{{ $('Humangent Previous').item.json.requestId }}",
       description:
-        "Optional. Pass the upstream Humangent node's requestId to link this request to the previous iteration as a revision continuation. Leave empty for the first iteration in a chain.",
+        "Optional. Pass the previous Humangent node's requestId to link this request to an earlier review. Leave empty for the first review in a chain.",
     },
   ],
 };
