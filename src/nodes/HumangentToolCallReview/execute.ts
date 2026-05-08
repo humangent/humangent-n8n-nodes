@@ -29,7 +29,7 @@
 //   * No drift handling on outcome ids — the system task type's
 //     outcomes_json is locked at the backend.
 
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import {
   NodeOperationError,
@@ -144,6 +144,18 @@ function previewToString(value: unknown): string {
   } catch {
     return "";
   }
+}
+
+function stableStringify(value: unknown): string {
+  return (
+    JSON.stringify(value, (_key, entry: unknown) => {
+      const record = objectRecord(entry);
+      if (!record) return entry;
+      return Object.fromEntries(
+        Object.entries(record).sort(([a], [b]) => a.localeCompare(b)),
+      );
+    }) ?? ""
+  );
 }
 
 function parseRedactedKeys(raw: unknown): string[] {
@@ -267,6 +279,17 @@ function buildToolCallPreview(
   };
 }
 
+function assertWrappedToolContext(
+  ctx: IExecuteFunctions,
+  preview: ToolCallPreview,
+): void {
+  if (preview.proposed.toolName) return;
+  throw new NodeOperationError(
+    ctx.getNode(),
+    "Humangent Tool Call Review could not resolve the wrapped tool name from the input item.",
+  );
+}
+
 interface WorkflowOrigin {
   executionId: string | undefined;
   workflow: ReturnType<IExecuteFunctions["getWorkflow"]>;
@@ -360,6 +383,7 @@ interface CreateReviewInput {
   taskTypeId: string;
   fields: Record<string, unknown>;
   metadata: ReturnType<typeof buildMetadata>;
+  idempotencyKey: string;
 }
 
 async function createToolCallReviewRequest(
@@ -372,12 +396,27 @@ async function createToolCallReviewRequest(
     fields: input.fields,
     resumeUrls: buildResumeUrls(ctx),
     metadata: input.metadata,
-    idempotencyKey: randomUUID(),
+    idempotencyKey: input.idempotencyKey,
   });
   if (!result.ok) {
     throw humangentApiError(ctx.getNode(), result);
   }
   return result;
+}
+
+function buildIdempotencyKey(
+  preview: ToolCallPreview,
+  origin: WorkflowOrigin,
+): string {
+  const source = stableStringify({
+    execution_id: origin.executionId ?? null,
+    node_id: origin.node.id,
+    parameters: preview.sanitizedParameters,
+    tool_name: preview.proposed.toolName,
+    workflow_id: origin.workflow.id,
+  });
+  const digest = createHash("sha256").update(source, "utf8").digest("hex");
+  return `tool-call-review:${digest}`;
 }
 
 function timeoutResponse(requestId: string): INodeExecutionData[][] {
@@ -407,10 +446,6 @@ export async function executeToolCallReview(
   const items = this.getInputData();
   assertSingleInput(this, items);
 
-  const creds = (await this.getCredentials(
-    "humangentApi",
-  )) as unknown as HumangentCredentials;
-  const taskTypeId = await resolveSystemTaskTypeId(this, creds);
   const waitSeconds = readWaitSeconds(this);
   const reviewerMessage = readReviewerMessage(this);
   const redactedKeysList = readRedactedKeys(this);
@@ -418,6 +453,7 @@ export async function executeToolCallReview(
     items,
     buildRedactedKeysSet(redactedKeysList),
   );
+  assertWrappedToolContext(this, preview);
   const origin = readWorkflowOrigin(this);
   const fields = buildFields(preview, origin, reviewerMessage);
   const metadata = buildMetadata(
@@ -426,11 +462,17 @@ export async function executeToolCallReview(
     redactedKeysList,
     waitSeconds,
   );
+  const idempotencyKey = buildIdempotencyKey(preview, origin);
 
+  const creds = (await this.getCredentials(
+    "humangentApi",
+  )) as unknown as HumangentCredentials;
+  const taskTypeId = await resolveSystemTaskTypeId(this, creds);
   const result = await createToolCallReviewRequest(this, creds, {
     taskTypeId,
     fields,
     metadata,
+    idempotencyKey,
   });
   await this.putExecutionToWait(new Date(Date.now() + waitSeconds * 1000));
 

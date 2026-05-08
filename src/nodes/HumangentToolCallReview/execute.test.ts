@@ -160,6 +160,9 @@ describe("executeToolCallReview — happy path", () => {
     expect(ensureCall.url).toMatch(/api_ensure_tool_call_review_task_type$/);
     expect(createCall.url).toMatch(/api_create_request$/);
     expect(createCall.body.p_task_type_id).toBe(SYSTEM_TASK_TYPE.id);
+    expect(createCall.headers["Idempotency-Key"]).toMatch(
+      /^tool-call-review:[a-f0-9]{64}$/,
+    );
 
     // metadata.tool_call_review carries the structured envelope the
     // inbox card consumes — sanitized parameters with `body` replaced.
@@ -196,6 +199,20 @@ describe("executeToolCallReview — happy path", () => {
     expect(json.timed_out).toBe(true);
     expect(json.request_id).toBe(VALID_REQUEST_RESPONSE.id);
   });
+
+  it("uses the same idempotency key for the same wrapped tool call context", async () => {
+    const first = makeExecuteCtx();
+    const second = makeExecuteCtx();
+
+    await executeToolCallReview.call(first.ctx);
+    await executeToolCallReview.call(second.ctx);
+
+    const firstCreate = first.httpRequest.mock.calls[1][0] as HttpRequestArgs;
+    const secondCreate = second.httpRequest.mock.calls[1][0] as HttpRequestArgs;
+    expect(firstCreate.headers["Idempotency-Key"]).toBe(
+      secondCreate.headers["Idempotency-Key"],
+    );
+  });
 });
 
 describe("executeToolCallReview — guards", () => {
@@ -214,6 +231,16 @@ describe("executeToolCallReview — guards", () => {
     await expect(executeToolCallReview.call(ctx)).rejects.toThrow(
       NodeOperationError,
     );
+  });
+
+  it("rejects missing wrapped tool name before opening a review request", async () => {
+    const { ctx, httpRequest } = makeExecuteCtx({
+      inputItems: [{ json: { tool: { parameters: { to: "a@example.com" } } } }],
+    });
+    await expect(executeToolCallReview.call(ctx)).rejects.toThrow(
+      NodeOperationError,
+    );
+    expect(httpRequest).not.toHaveBeenCalled();
   });
 
   it("fails fast when the backend returns a task type with unexpected outcomes (out-of-band contract change)", async () => {
