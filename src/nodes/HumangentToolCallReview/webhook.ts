@@ -38,47 +38,9 @@ import type {
   IWebhookResponseData,
 } from "n8n-workflow";
 
-import { verifySignature } from "../../lib/hmac";
-import {
-  DecisionDeliverySchema,
-  type DecisionDelivery,
-} from "../../lib/schemas";
+import { type DecisionDelivery } from "../../lib/schemas";
 import type { HumangentCredentials } from "../../lib/api";
-
-const SIGNATURE_HEADER_LOWER = "x-humangent-signature";
-
-/**
- * Read the raw UTF-8 body bytes n8n received. The HMAC signature
- * covers exactly these bytes; a JSON.parse → JSON.stringify round
- * trip works for the flat decision payloads but only if V8's
- * insertion order is preserved (it is) AND no Unicode escapes are
- * present. Prefer the rawBody path; fall back to re-stringify.
- */
-function readRawBody(ctx: IWebhookFunctions): string {
-  const parsed = ctx.getBodyData();
-  const req = ctx.getRequestObject() as {
-    rawBody?: string | Buffer;
-  } | null;
-  const raw = req?.rawBody;
-  if (typeof raw === "string") return raw;
-  if (raw && typeof (raw as Buffer).toString === "function") {
-    return (raw as Buffer).toString("utf8");
-  }
-  return JSON.stringify(parsed);
-}
-
-function denyWith(
-  status: number,
-  body: Record<string, unknown>,
-): IWebhookResponseData {
-  return {
-    webhookResponse: {
-      status,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  };
-}
+import { verifyAndParseDelivery } from "../../lib/webhookHelpers";
 
 /**
  * Map a verified DecisionDelivery into the JSON shape n8n's HITL
@@ -168,34 +130,10 @@ export async function webhookToolCallReviewResume(
   const creds = (await this.getCredentials(
     "humangentApi",
   )) as unknown as HumangentCredentials;
-  const headers = this.getHeaderData() as Record<string, string | undefined>;
 
-  const signatureHeader = headers[SIGNATURE_HEADER_LOWER];
-
-  const rawBody = readRawBody(this);
-
-  const verifyResult = verifySignature({
-    header: signatureHeader,
-    body: rawBody,
-    secret: creds.apiKey,
-    now: Math.floor(Date.now() / 1000),
-  });
-  if (!verifyResult.valid) {
-    return denyWith(401, {
-      error: "invalid_signature",
-      reason: verifyResult.reason,
-    });
-  }
-
-  const parsedBody = this.getBodyData();
-  const parsed = DecisionDeliverySchema.safeParse(parsedBody);
-  if (!parsed.success) {
-    return denyWith(400, {
-      error: "malformed_decision_payload",
-      detail: parsed.error.message,
-    });
-  }
-  const delivery = parsed.data;
+  const verified = await verifyAndParseDelivery(this, creds);
+  if (!verified.ok) return verified.response;
+  const delivery = verified.delivery;
 
   if (isDuplicateDelivery(this, delivery.delivery_id)) {
     // n8n's first hit already resumed the execution. Acknowledge so

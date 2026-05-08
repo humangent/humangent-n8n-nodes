@@ -39,6 +39,7 @@ import {
   type IWebhookResponseData,
 } from "n8n-workflow";
 
+import { RESTART_WEBHOOK_DESCRIPTIONS } from "../../lib/nodeDescriptions";
 import { executeToolCallReview } from "./execute";
 import { webhookToolCallReviewResume } from "./webhook";
 
@@ -64,26 +65,7 @@ const description: INodeTypeDescription = {
   // path so both the API delivery POST and any approval-link GET
   // hit this node's webhook handler. The HITL wrapper does not
   // override these.
-  webhooks: [
-    {
-      name: "default",
-      httpMethod: "GET",
-      responseMode: "onReceived",
-      responseData: "",
-      path: "={{ $nodeId }}",
-      restartWebhook: true,
-      isFullPath: true,
-    },
-    {
-      name: "default",
-      httpMethod: "POST",
-      responseMode: "onReceived",
-      responseData: "",
-      path: "={{ $nodeId }}",
-      restartWebhook: true,
-      isFullPath: true,
-    },
-  ],
+  webhooks: RESTART_WEBHOOK_DESCRIPTIONS,
   properties: [
     // `operation` MUST be a `type: "options"` with at least one
     // option whose `value === SEND_AND_WAIT_OPERATION` for n8n's

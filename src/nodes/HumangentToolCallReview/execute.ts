@@ -68,6 +68,24 @@ interface ProposedToolCall {
   parametersRaw: unknown;
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const s = nonEmptyString(value);
+    if (s) return s;
+  }
+  return null;
+}
+
 function readProposedToolCall(
   items: INodeExecutionData[],
 ): ProposedToolCall {
@@ -77,20 +95,11 @@ function readProposedToolCall(
   // The HITL wrapper resolves `$tool.name` / `$tool.parameters` into
   // either top-level keys on json or nested under `tool`. Read both
   // shapes; n8n versions vary.
-  const toolField = json["tool"];
-  const nested =
-    toolField && typeof toolField === "object" && !Array.isArray(toolField)
-      ? (toolField as Record<string, unknown>)
-      : undefined;
-  const toolNameRaw =
-    (typeof json["toolName"] === "string" && json["toolName"]) ||
-    (typeof json["tool_name"] === "string" && json["tool_name"]) ||
-    (nested && typeof nested["name"] === "string" && nested["name"]) ||
-    null;
+  const nested = objectRecord(json["tool"]);
   const parametersRaw =
     json["toolParameters"] ?? json["tool_parameters"] ?? nested?.["parameters"];
   return {
-    toolName: typeof toolNameRaw === "string" ? toolNameRaw : null,
+    toolName: firstString(json["toolName"], json["tool_name"], nested?.["name"]),
     parametersRaw,
   };
 }
@@ -145,33 +154,22 @@ function parseRedactedKeys(raw: unknown): string[] {
     .filter((k) => k.length > 0);
 }
 
-export async function executeToolCallReview(
-  this: IExecuteFunctions,
-): Promise<INodeExecutionData[][]> {
-  const items = this.getInputData();
+function assertSingleInput(
+  ctx: IExecuteFunctions,
+  items: INodeExecutionData[],
+): void {
   if (items.length > 1) {
     throw new NodeOperationError(
-      this.getNode(),
+      ctx.getNode(),
       `Humangent Tool Call Review expects a single input item per execute; received ${items.length}. The HITL wrapper invokes this once per agent tool call — N>1 indicates an upstream Loop / Split In Batches the agent did not intend.`,
     );
   }
+}
 
-  const creds = (await this.getCredentials(
-    "humangentApi",
-  )) as unknown as HumangentCredentials;
-
-  // Resolve the system task type. The backend RPC is idempotent —
-  // first call creates, repeats return the same row.
-  const taskTypeResult = await ensureToolCallReviewTaskType(
-    requesterFor(this),
-    creds,
-  );
-  if (!taskTypeResult.ok) {
-    throw humangentApiError(this.getNode(), taskTypeResult);
-  }
-  const taskTypeId = taskTypeResult.data.id;
-  const liveOutcomes = taskTypeResult.data.outcomes_json;
-
+function assertOutcomeContract(
+  ctx: IExecuteFunctions,
+  liveOutcomes: ReadonlyArray<{ id: string }>,
+): void {
   // Defense in depth: the system task type ships with `approve` and
   // `deny`. If a future backend version evolves the contract, fail
   // fast here so the node version becomes the explicit upgrade gate
@@ -182,23 +180,41 @@ export async function executeToolCallReview(
     liveOutcomeIds.length === expected.length &&
     liveOutcomeIds.every((id, i) => id === expected[i]);
   if (!matchesContract) {
-    throw humangentApiError(this.getNode(), {
+    throw humangentApiError(ctx.getNode(), {
       ok: false,
       status: 412,
       code: "tool_call_review_outcome_contract_mismatch",
       message: `The Humangent backend returned a tool-call review task type with outcomes ${JSON.stringify(liveOutcomeIds)}; this node version expects ${JSON.stringify(expected)}. Upgrade the node package.`,
     });
   }
+}
 
-  // Wait-time configuration.
-  const limitWaitTimeRaw = this.getNodeParameter("limitWaitTime", 0, 24);
+async function resolveSystemTaskTypeId(
+  ctx: IExecuteFunctions,
+  creds: HumangentCredentials,
+): Promise<string> {
+  // Resolve the system task type. The backend RPC is idempotent —
+  // first call creates, repeats return the same row.
+  const taskTypeResult = await ensureToolCallReviewTaskType(
+    requesterFor(ctx),
+    creds,
+  );
+  if (!taskTypeResult.ok) {
+    throw humangentApiError(ctx.getNode(), taskTypeResult);
+  }
+  assertOutcomeContract(ctx, taskTypeResult.data.outcomes_json);
+  return taskTypeResult.data.id;
+}
+
+function readWaitSeconds(ctx: IExecuteFunctions): number {
+  const limitWaitTimeRaw = ctx.getNodeParameter("limitWaitTime", 0, 24);
   const limitWaitTime =
     typeof limitWaitTimeRaw === "number" &&
     Number.isFinite(limitWaitTimeRaw) &&
     limitWaitTimeRaw > 0
       ? limitWaitTimeRaw
       : 24;
-  const limitWaitTimeUnitRaw = this.getNodeParameter(
+  const limitWaitTimeUnitRaw = ctx.getNodeParameter(
     "limitWaitTimeUnit",
     0,
     "hours",
@@ -206,67 +222,112 @@ export async function executeToolCallReview(
   const unitSeconds = Object.hasOwn(UNIT_SECONDS, limitWaitTimeUnitRaw)
     ? UNIT_SECONDS[limitWaitTimeUnitRaw as WaitUnit]
     : UNIT_SECONDS.hours;
-  const waitSeconds = Math.max(1, Math.floor(limitWaitTime * unitSeconds));
+  return Math.max(1, Math.floor(limitWaitTime * unitSeconds));
+}
 
+function readReviewerMessage(ctx: IExecuteFunctions): string {
   // Reviewer message — n8n's HITL wrapper auto-fills this with the
   // generator's default if the builder didn't set one. We pass it
   // through as the canonical reviewer-facing copy.
-  const messageRaw = this.getNodeParameter("message", 0, "");
-  const reviewerMessage =
-    typeof messageRaw === "string" ? messageRaw : String(messageRaw ?? "");
+  const messageRaw = ctx.getNodeParameter("message", 0, "");
+  return typeof messageRaw === "string" ? messageRaw : String(messageRaw ?? "");
+}
 
+function readRedactedKeys(ctx: IExecuteFunctions): string[] {
   // Redacted keys set — case-insensitive lookup.
-  const redactedKeysParam = this.getNodeParameter(
-    "redactedParameterKeys",
-    0,
-    "",
+  return parseRedactedKeys(
+    ctx.getNodeParameter("redactedParameterKeys", 0, ""),
   );
-  const redactedKeysList = parseRedactedKeys(redactedKeysParam);
-  const redactedKeysSet = new Set(redactedKeysList.map((k) => k.toLowerCase()));
+}
 
+function buildRedactedKeysSet(redactedKeysList: string[]): Set<string> {
+  return new Set(redactedKeysList.map((k) => k.toLowerCase()));
+}
+
+interface ToolCallPreview {
+  proposed: ProposedToolCall;
+  sanitizedParameters: unknown;
+  previewText: string;
+}
+
+function buildToolCallPreview(
+  items: INodeExecutionData[],
+  redactedKeysSet: ReadonlySet<string>,
+): ToolCallPreview {
   // Read what the AI Agent proposed and sanitize it.
   const proposed = readProposedToolCall(items);
   const sanitizedParameters = redactParameters(
     proposed.parametersRaw,
     redactedKeysSet,
   );
-  const previewText = previewToString(sanitizedParameters);
+  return {
+    proposed,
+    sanitizedParameters,
+    previewText: previewToString(sanitizedParameters),
+  };
+}
 
+interface WorkflowOrigin {
+  executionId: string | undefined;
+  workflow: ReturnType<IExecuteFunctions["getWorkflow"]>;
+  node: ReturnType<IExecuteFunctions["getNode"]>;
+  workflowName: string | null;
+}
+
+function readWorkflowOrigin(ctx: IExecuteFunctions): WorkflowOrigin {
   // Workflow / execution / node identifiers — surfaced in the inbox
   // card via metadata.tool_call_review and visible to reviewers as
   // origin context.
-  const executionId = this.getExecutionId();
-  const workflow = this.getWorkflow();
-  const node = this.getNode();
+  const executionId = ctx.getExecutionId();
+  const workflow = ctx.getWorkflow();
+  const node = ctx.getNode();
   const workflowName =
     typeof workflow.name === "string" && workflow.name.length > 0
       ? workflow.name
       : null;
+  return { executionId, workflow, node, workflowName };
+}
 
+function buildFields(
+  preview: ToolCallPreview,
+  origin: WorkflowOrigin,
+  reviewerMessage: string,
+): Record<string, unknown> {
   // Standard inbox fields for the system task type. The schema
   // declares all fields as optional; we populate what we have so
   // the existing RequestFieldsCard renders the same content the
   // tool-call card surfaces (one card from metadata, one from
   // fields — both useful).
-  const fields: Record<string, unknown> = {
-    tool_name: proposed.toolName ?? "",
-    parameters_preview: previewText,
-    workflow_name: workflowName ?? "",
-    execution_context: executionId ? `n8n execution ${executionId}` : "",
+  return {
+    tool_name: preview.proposed.toolName ?? "",
+    parameters_preview: preview.previewText,
+    workflow_name: origin.workflowName ?? "",
+    execution_context: origin.executionId
+      ? `n8n execution ${origin.executionId}`
+      : "",
     reviewer_message: reviewerMessage,
   };
+}
 
+function buildResumeUrls(ctx: IExecuteFunctions): Record<string, string> {
   // Resume URLs cover every outcome ∪ {dismiss} — the gateway
   // validator rejects subsets. We register all three even though
   // only `approve` / `deny` round-trip through the HITL contract;
   // a reviewer hitting Dismiss in the inbox still resolves the
   // request, and the webhook handler maps it to {approved: false}.
-  const resumeUrls: Record<string, string> = {
-    approve: this.getSignedResumeUrl({ outcome: "approve" }),
-    deny: this.getSignedResumeUrl({ outcome: "deny" }),
-    dismiss: this.getSignedResumeUrl({ outcome: "dismiss" }),
+  return {
+    approve: ctx.getSignedResumeUrl({ outcome: "approve" }),
+    deny: ctx.getSignedResumeUrl({ outcome: "deny" }),
+    dismiss: ctx.getSignedResumeUrl({ outcome: "dismiss" }),
   };
+}
 
+function buildMetadata(
+  preview: ToolCallPreview,
+  origin: WorkflowOrigin,
+  redactedKeysList: string[],
+  waitSeconds: number,
+) {
   // Structured tool-call envelope — the canonical shape consumed by
   // the reviewer-inbox `<ToolCallReviewCard />`. Documented in the
   // Humangent app repo at docs/api/public-requests-api.md §
@@ -274,40 +335,52 @@ export async function executeToolCallReview(
   const toolCallReviewMeta = {
     source: "n8n.HumangentToolCallReview",
     version: 1,
-    tool_name: proposed.toolName,
-    parameters_preview: sanitizedParameters,
+    tool_name: preview.proposed.toolName,
+    parameters_preview: preview.sanitizedParameters,
     redacted_keys: redactedKeysList,
-    workflow_name: workflowName,
+    workflow_name: origin.workflowName,
     workflow_id:
-      typeof workflow.id === "string" && workflow.id.length > 0
-        ? workflow.id
+      typeof origin.workflow.id === "string" && origin.workflow.id.length > 0
+        ? origin.workflow.id
         : null,
-    execution_id: executionId ?? null,
-    node_id: node.id,
+    execution_id: origin.executionId ?? null,
+    node_id: origin.node.id,
   };
 
-  const metadata = {
-    n8n_execution_id: executionId,
-    n8n_workflow_id: workflow.id,
-    n8n_node_id: node.id,
+  return {
+    n8n_execution_id: origin.executionId,
+    n8n_workflow_id: origin.workflow.id,
+    n8n_node_id: origin.node.id,
     limit_wait_time_seconds: waitSeconds,
     tool_call_review: toolCallReviewMeta,
   };
+}
 
-  const result = await createRequest(requesterFor(this), creds, {
-    taskTypeId,
-    fields,
-    resumeUrls,
-    metadata,
+interface CreateReviewInput {
+  taskTypeId: string;
+  fields: Record<string, unknown>;
+  metadata: ReturnType<typeof buildMetadata>;
+}
+
+async function createToolCallReviewRequest(
+  ctx: IExecuteFunctions,
+  creds: HumangentCredentials,
+  input: CreateReviewInput,
+) {
+  const result = await createRequest(requesterFor(ctx), creds, {
+    taskTypeId: input.taskTypeId,
+    fields: input.fields,
+    resumeUrls: buildResumeUrls(ctx),
+    metadata: input.metadata,
     idempotencyKey: randomUUID(),
   });
   if (!result.ok) {
-    throw humangentApiError(this.getNode(), result);
+    throw humangentApiError(ctx.getNode(), result);
   }
+  return result;
+}
 
-  const waitTill = new Date(Date.now() + waitSeconds * 1000);
-  await this.putExecutionToWait(waitTill);
-
+function timeoutResponse(requestId: string): INodeExecutionData[][] {
   // Synthetic timeout payload. n8n routes this onto the only
   // configured Main output if waitTill fires before any webhook.
   // The agent's HITL processor reads `approved: false` and treats
@@ -319,11 +392,47 @@ export async function executeToolCallReview(
         json: {
           approved: false,
           timed_out: true,
-          request_id: result.data.id,
+          request_id: requestId,
           chatInput:
             "The reviewer did not respond within the configured wait time. The tool call was not executed.",
         },
       },
     ],
   ];
+}
+
+export async function executeToolCallReview(
+  this: IExecuteFunctions,
+): Promise<INodeExecutionData[][]> {
+  const items = this.getInputData();
+  assertSingleInput(this, items);
+
+  const creds = (await this.getCredentials(
+    "humangentApi",
+  )) as unknown as HumangentCredentials;
+  const taskTypeId = await resolveSystemTaskTypeId(this, creds);
+  const waitSeconds = readWaitSeconds(this);
+  const reviewerMessage = readReviewerMessage(this);
+  const redactedKeysList = readRedactedKeys(this);
+  const preview = buildToolCallPreview(
+    items,
+    buildRedactedKeysSet(redactedKeysList),
+  );
+  const origin = readWorkflowOrigin(this);
+  const fields = buildFields(preview, origin, reviewerMessage);
+  const metadata = buildMetadata(
+    preview,
+    origin,
+    redactedKeysList,
+    waitSeconds,
+  );
+
+  const result = await createToolCallReviewRequest(this, creds, {
+    taskTypeId,
+    fields,
+    metadata,
+  });
+  await this.putExecutionToWait(new Date(Date.now() + waitSeconds * 1000));
+
+  return timeoutResponse(result.data.id);
 }
