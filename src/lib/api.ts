@@ -256,6 +256,31 @@ export async function getTaskType(
 }
 
 /**
+ * Resolve the caller-org's tool-call review system task type, creating
+ * it on first call. Used by the HumangentToolCallReview node when an
+ * AI Agent proposes a tool call. The Humangent backend pins the
+ * row's outcomes to `approve` + `deny` and locks them from editor
+ * mutation, so the node's outcome → `{approved: bool}` mapping is
+ * stable across edits.
+ *
+ * Plan: humangent app —
+ * docs/plans/2026-05-07-002-feat-humangent-tool-call-review-plan.md U2.
+ */
+export async function ensureToolCallReviewTaskType(
+  requester: HttpRequester,
+  creds: HumangentCredentials,
+): Promise<ApiResult<TaskTypeRow>> {
+  const raw = await callRpc(requester, creds, {
+    rpcName: "api_ensure_tool_call_review_task_type",
+    body: {},
+  });
+  if (!raw.ok) return raw;
+  const parsed = TaskTypeRowSchema.safeParse(raw.data);
+  if (!parsed.success) return malformedResponse(parsed.error.message);
+  return { ok: true, data: parsed.data };
+}
+
+/**
  * The decision-callback block sent by `Create` mode requests. Carries
  * the (workflow_id, node_id, n8n_instance_id) tuple the backend
  * resolves to a registered Continue subscription, plus the
