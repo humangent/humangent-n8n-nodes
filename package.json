@@ -38,7 +38,8 @@
     "n8nNodesApiVersion": 1,
     "nodes": [
       "dist/nodes/Humangent/Humangent.node.js",
-      "dist/nodes/HumangentContinue/HumangentContinue.node.js"
+      "dist/nodes/HumangentContinue/HumangentContinue.node.js",
+      "dist/nodes/HumangentToolCallReview/HumangentToolCallReview.node.js"
     ],
     "credentials": [
       "dist/credentials/HumangentApi.credentials.js"
