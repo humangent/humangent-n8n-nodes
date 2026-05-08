@@ -10,7 +10,8 @@
 //   * outcome contract guard — fails fast if the backend ever returns
 //     a task type whose outcomes diverge from the pinned approve+deny
 //     pair (out-of-band backend change shipping ahead of the node).
-//   * multi-item rejection — N>1 input items raises NodeOperationError.
+//   * input-count rejection — anything other than one input item raises
+//     NodeOperationError.
 
 import { describe, expect, it, vi } from "vitest";
 import { NodeApiError, NodeOperationError } from "n8n-workflow";
@@ -198,7 +199,15 @@ describe("executeToolCallReview — happy path", () => {
 });
 
 describe("executeToolCallReview — guards", () => {
-  it("rejects N>1 input items with a NodeOperationError pointing at the loop pattern", async () => {
+  it("rejects zero input items with a NodeOperationError", async () => {
+    const { ctx, httpRequest } = makeExecuteCtx({ inputItems: [] });
+    await expect(executeToolCallReview.call(ctx)).rejects.toThrow(
+      NodeOperationError,
+    );
+    expect(httpRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects N>1 input items with a NodeOperationError", async () => {
     const { ctx } = makeExecuteCtx({
       inputItems: [{ json: {} }, { json: {} }],
     });

@@ -158,10 +158,10 @@ function assertSingleInput(
   ctx: IExecuteFunctions,
   items: INodeExecutionData[],
 ): void {
-  if (items.length > 1) {
+  if (items.length !== 1) {
     throw new NodeOperationError(
       ctx.getNode(),
-      `Humangent Tool Call Review expects a single input item per execute; received ${items.length}. The HITL wrapper invokes this once per agent tool call — N>1 indicates an upstream Loop / Split In Batches the agent did not intend.`,
+      `Humangent Tool Call Review expects exactly one input item per execute; received ${items.length}. The HITL wrapper invokes this once per agent tool call.`,
     );
   }
 }
