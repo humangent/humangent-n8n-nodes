@@ -146,6 +146,109 @@ Long review with a separate destination workflow:
 5. Enter the destination **Continue Node Name**.
 6. Map the required **Fields** and run the source workflow.
 
+## Humangent Tool Call Review (AI Agent HITL)
+
+> Tested with **n8n 2.18.5**. Requires an n8n version that ships the
+> AI Agent HITL feature.
+
+Use **Humangent Tool Call Review** when you want a reviewer to
+approve or deny each downstream tool call an AI Agent proposes,
+such as Gmail, CRM writes, or HTTP requests, instead of
+gating the whole workflow at the front. The node registers as an
+n8n-native HITL tool for the AI Agent: the agent sees the original
+downstream tool's schema, the reviewer sees what's about to happen,
+and only approval permits the gated tool to run.
+
+### Builder setup
+
+Canonical wiring on the canvas:
+
+```text
+AI Agent -- Tool --> Humangent Tool Call Review -- Tool --> Gmail / CRM / HTTP
+```
+
+1. Drop the **AI Agent** (langchain) node onto a workflow.
+2. Connect **Humangent Tool Call Review** to one of the AI Agent's
+   tool ports. n8n's HITL generator wraps it as an `*HitlTool` variant
+   automatically when the agent runs.
+3. Connect the actual downstream tool (Gmail, HTTP Request, anything
+   ending in `Tool`) to Humangent Tool Call Review's tool input. The
+   agent still sees the downstream tool's full schema — you do **not**
+   re-declare parameters on the Humangent node.
+4. Pick the **Humangent API** credential. The node calls
+   `api_ensure_tool_call_review_task_type` on first run to resolve
+   and create on demand the system task type for the org. There is
+   **no** task-type picker — the system task type's outcomes
+   (`approve`, `deny`) are pinned by the Humangent backend so the
+   agent's `{approved: bool}` contract stays stable across editor
+   edits.
+5. Optionally fill **Message** with reviewer-facing copy (defaults to
+   `The agent wants to call {{ $tool.name }}`), set **Limit Wait Time**,
+   and list **Redact Parameter Keys** for any parameter values that
+   must not appear in the reviewer's preview.
+
+### Enforcement boundary
+
+The Humangent gate **only applies to tool calls routed through this
+node**. If you also connect a sensitive downstream tool directly to
+the Agent's tool port, the agent can call it without review.
+
+Connect each sensitive tool **only** through Humangent Tool Call
+Review. A direct AI-Agent to Gmail link bypasses Humangent.
+
+### Reviewer experience
+
+The request opens in the Humangent inbox with:
+
+- A **Proposed tool call** card (proposed tool name, sanitized
+  parameter preview, redaction notice, n8n workflow / execution /
+  node origin pointers).
+- The standard request fields card with the same data, populated for
+  reviewers who prefer the form layout.
+- Two action buttons: **Approve** and **Deny**. Reviewers can also
+  use the inbox's **Dismiss** flow.
+
+Routing applies the same way as any other Humangent task type —
+admins can route the **Tool call review** task type to a specific
+team or escalation chain in the task-type editor. Outcomes and
+field schema are read-only on the system task type; routing,
+cosmetics, and archive remain editable.
+
+### Outcome → agent contract
+
+The webhook handler maps the reviewer's decision into the
+`{approved, chatInput?}` shape n8n's `processHitlResponses` reads:
+
+| Reviewer outcome              | Returned to agent                                                |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `approve`                     | `{ approved: true, chatInput: <reviewer note> }`                 |
+| `deny`                        | `{ approved: false, chatInput: <reviewer note or default> }`     |
+| **Dismiss** (inbox flow)      | `{ approved: false, dismissed: true, chatInput: … }`             |
+| **Timeout** (no decision)     | `{ approved: false, timed_out: true, chatInput: … }`             |
+| Delivery failure / bad sig    | No resume — n8n keeps the execution waiting; deliver-decision retries |
+
+After a denial, the agent's HITL processor surfaces a
+`STOP what you are doing and wait for the user to tell you how to proceed`
+prompt to the model, with the reviewer's `chatInput` as guidance.
+
+### System prompt guidance
+
+Build agent system prompts that gracefully handle denials — the agent
+will see denial messages from `processHitlResponses` and should
+acknowledge them rather than retrying. A typical add-on:
+
+> When a tool call is denied, do not retry. Summarize what was blocked
+> and ask the user how to proceed. Reviewer notes (when present) are
+> guidance from a human and take priority over your previous plan.
+
+### Fallback for unsupported n8n versions
+
+If your n8n is older than 2.x or runs without the AI Agent HITL
+generator, the node still appears in the picker but n8n won't
+auto-wrap it as an `*HitlTool`. As a fallback you can use a regular
+**Humangent** node with a protected subworkflow that runs the
+sensitive tool only on the approve branch.
+
 ## Troubleshooting
 
 | Symptom | Check |

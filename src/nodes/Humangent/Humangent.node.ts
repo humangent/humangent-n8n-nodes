@@ -27,6 +27,7 @@ import {
   type IWebhookResponseData,
 } from "n8n-workflow";
 
+import { RESTART_WEBHOOK_DESCRIPTIONS } from "../../lib/nodeDescriptions";
 import { executeCreateRequest } from "./execute";
 import { listTaskTypes } from "./listSearch";
 import { configuredOutputs } from "./outputs";
@@ -63,26 +64,7 @@ const description: INodeTypeDescription = {
   // (GET + POST) registered on the same restart-webhook path so the
   // approval-button click (GET) and the API delivery (POST) both
   // reach this node.
-  webhooks: [
-    {
-      name: "default",
-      httpMethod: "GET",
-      responseMode: "onReceived",
-      responseData: "",
-      path: "={{ $nodeId }}",
-      restartWebhook: true,
-      isFullPath: true,
-    },
-    {
-      name: "default",
-      httpMethod: "POST",
-      responseMode: "onReceived",
-      responseData: "",
-      path: "={{ $nodeId }}",
-      restartWebhook: true,
-      isFullPath: true,
-    },
-  ],
+  webhooks: RESTART_WEBHOOK_DESCRIPTIONS,
   properties: [
     // Hidden marker that opts the node into n8n core's send-and-wait
     // waiting-webhook validator branch.

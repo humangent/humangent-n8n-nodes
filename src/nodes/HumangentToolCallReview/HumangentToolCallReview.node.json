@@ -1,0 +1,27 @@
+{
+  "node": "@humangent/n8n-nodes-humangent.humangentToolCallReview",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["HITL"],
+  "subcategories": {
+    "HITL": ["Human in the Loop"]
+  },
+  "alias": [
+    "human",
+    "hitl",
+    "approval",
+    "review",
+    "tool",
+    "tool-call",
+    "agent",
+    "ai-agent",
+    "humangent"
+  ],
+  "resources": {
+    "primaryDocumentation": [
+      {
+        "url": "https://humangent.io/docs/n8n-node-tool-call-review"
+      }
+    ]
+  }
+}

@@ -4,5 +4,23 @@
   // eslint-plugin-n8n-nodes-base is loaded by FlatCompat via the string
   // "plugin:n8n-nodes-base/{nodes,credentials}" in eslint.config.mjs, so it
   // has no `import` statement for fallow's static analyzer to follow.
-  "ignoreDependencies": ["eslint-plugin-n8n-nodes-base"]
+  "ignoreDependencies": ["eslint-plugin-n8n-nodes-base"],
+
+  // n8n invokes these INodeType lifecycle methods reflectively after loading
+  // compiled node classes from package.json's `n8n.nodes` manifest.
+  "usedClassMembers": [
+    {
+      "implements": "INodeType",
+      "members": ["execute", "webhook"]
+    }
+  ],
+
+  // Tests deliberately repeat setup shapes to keep cases readable. Keep the
+  // PR audit focused on production duplication and complexity.
+  "duplicates": {
+    "ignore": ["**/*.test.ts"]
+  },
+  "health": {
+    "ignore": ["**/*.test.ts"]
+  }
 }
